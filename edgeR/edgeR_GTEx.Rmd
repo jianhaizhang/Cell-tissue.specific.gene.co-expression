@@ -7,16 +7,17 @@ output:
 fontsize: 14pt
 ---
 
-# 1. Raw data manipulation and design matrix.
-## 1.1 Packages.
+# Raw data manipulation and design matrix.
+## Packages.
 ```{r packages, eval=T, message=F, warning=F}
 
 # The framework requires "edgeR_3.18.0" and "R/3.4.0".
+
 setwd("~/RNA-Seq_practice/edgeR")
 library(edgeR); library(gplots); library(RColorBrewer); library(org.Hs.eg.db)
 
 ```
-## 1.2 Import data.
+## Import data.
 ```{r import_data, eval=T, message=F, warning=F}
  
 # Read subject phenotypes.
@@ -45,7 +46,7 @@ if (file.exists("count")) { load("count") } else {
 colnames(count)<-unname(t(count[2,])); count1 <- count[-c(1:2), ]
 
 ```
-## 1.3 Extract male subjects, aged 50-59, from ventilator Case (All cases on a ventilator 
+## Extract male subjects, aged 50-59, from ventilator Case (All cases on a ventilator 
 immediately before death).
 ```{r Extract_specific_subject, eval=T, message=F, warning=F}
 
@@ -82,7 +83,7 @@ count.final <- count.final[1:100,] # Toy data.
 
 ```{r gene_annotation, eval=F, message=F, warning=F}
 
-## 1.4 Annotate genes with Entrez Gene identifiers and RefSeq for GO and KEGG enrichment.
+## Annotate genes with Entrez Gene identifiers and RefSeq for GO and KEGG enrichment.
 # Get Entrez ID.
 x <- as.list(org.Hs.egENSEMBL2EG)
 row.names(count.final) <- sub("\\.\\d+$", "", row.names(count.final))
@@ -105,7 +106,7 @@ refseq <- x.li[unlist(entr.sel)]
 ```
 
 
-## 1.5 Convert the final counts to DGEList.
+## Convert the final counts to DGEList.
 ```{r DGEList, eval=T, message=F, warning=F}
 
 y <- DGEList(counts=count.final, genes=rownames(count.final))
@@ -116,7 +117,7 @@ colnames(y$genes) <- "ENSEMBL_ID"
 
 ```
 
-## 1.6 Data exploration: examine outliers and sample relationships.
+## Data exploration: examine outliers and sample relationships.
 
 ```{r data_exploration, eval=T, message=F, warning=F}
 
@@ -125,7 +126,7 @@ colnames(y$genes) <- "ENSEMBL_ID"
 
 ```
 
-## 1.7 Design matrix.
+## Design matrix.
 ```{r design_matrix, eval=T, message=F, warning=F}
 
 # Make factor index for tissues.
@@ -155,12 +156,12 @@ plotBCV(y)
 
 ```
 
-# 2. Differential analysis of any pairs with analysis of deviance (ANODEV). In the 
+# Differential analysis of any pairs with analysis of deviance (ANODEV). In the 
 # quasi-likelihood (QL) approach, the tagwise NB dispersions are not used. The estimation 
 # of QL dispersions is performed using the glmQLFit function. This method requires 
 # "edgeR_3.18.0" and "R/3.4.0".
 
-## 2.1 Contrast matrix and glm fit.
+## Contrast matrix and glm fit.
 ```{r matrix_fit, eval=T, message=F, warning=F}
 
 # Make contrast matrix for all pairwise comparisons.
@@ -174,7 +175,7 @@ plotQLDisp(fit.ql)
 
 ```
 
-## 2.2 QL F-test.
+## QL F-test.
 ```{r F_test, eval=T, message=F, warning=F}
 
 res.ql <- glmQLFTest(fit.ql, contrast=con.ma)
@@ -277,9 +278,9 @@ deg.gen.ql <- c(na.up.ql, na.dow.ql)
 
 ```
 
-# 3. Differential analysis of any pairs with glmLRT() via a loop.
+# Differential analysis of any pairs with glmLRT() via a loop.
 
-## 3.1 Extract DEGs in each comparison.
+## Extract DEGs in each comparison.
 ```{r DEGs_each_comparison_PW, eval=T, message=F, warning=F}
 
 # This step is time comsuming, so save the results.
@@ -339,7 +340,7 @@ if (all(file.exists(df.na))) {
 ```
 
 
-## 3.2 Extract tissue specific DEGs from above data frames.
+## Extract tissue specific DEGs from above data frames.
 ```{r tissue_specific_DEGs_PW, eval=T, message=F, warning=F}
 
 deg.gen <- NULL
@@ -393,7 +394,7 @@ for (i in colnames(design)) {
 
 ```
 
-# 4. Extract DEGs identified by both methods.
+## Extract DEGs identified by both methods.
 ```{r Overlapping_DEGs, eval=T, message=F, warning=F}
 
 sor.ql <- sub("(.*)_ql", "\\1", sort(deg.gen.ql))
@@ -415,7 +416,7 @@ if (all(sor.ql == sort(deg.gen))) {
 
 ```
 
-# 5. Summary of DEGs by the two methods and the overlapping DEGs.
+# Summary of DEGs by the two methods and the overlapping DEGs.
 ```{r summary_DEGs, eval=T, message=F, warning=F}
 
 df.sum <- data.frame(matrix(NA, nrow = nrow(con.ma), ncol = 9, dimnames = list(sort(
@@ -485,7 +486,7 @@ df.sum[, "all.both"] <- rowSums(df.sum[, c("up.both", "dow.both")])
 
 ```
 
-# 6. Heat map of all DEGs.
+# Heat map of all DEGs.
 ```{r heatmap_DEGs, eval=T, message=F, warning=F}
 
 y.nor <- cpm(y, log=TRUE, prior.count = 1)
@@ -500,7 +501,7 @@ trace="none", margins =c(12,9), col=palette, dendrogram="both", scale="row")
 
 ```
 
-# 7. Modular analysis.
+# Modular analysis.
 ```{r module_analysis, eval=T, message=F, warning=F}
 
 library(isa2, lib.loc = "~/R/x86_64-pc-linux-gnu-library/3.4")
@@ -522,14 +523,14 @@ colnames(y$counts)[mod[[5]]$columns]
 
 ```
 
-# 8. Session Information.
+# Session Information.
 ```{r sessionInfor, eval=T, message=F, warning=F}
 
 sessionInfo()
 
 ```
 
-# 9. Reference.
+# Reference.
 
 1. https://f1000research.com/articles/5-1438/v1
 2. https://www2.unil.ch/cbg/homepage/ISA_tutorial.html
