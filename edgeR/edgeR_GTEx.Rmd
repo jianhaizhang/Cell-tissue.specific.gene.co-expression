@@ -1,0 +1,546 @@
+---
+title: Differential Analysis of RNA seq Data (GTEx)
+author: "Jianhai/Zhang (zhang.jianhai@hotmail.com)"
+date: "Last update: `r format(Sys.time(), '%d %B, %Y')`" 
+output:
+  html_document:
+fontsize: 14pt
+---
+
+# Raw data manipulation and design matrix.
+## Packages.
+```{r packages, eval=T, message=F, warning=F}
+
+# The framework requires "edgeR_3.18.0" and "R/3.4.0".
+
+setwd("~/RNA-Seq_practice/edgeR")
+library(edgeR); library(gplots); library(RColorBrewer); library(org.Hs.eg.db)
+
+```
+## Import data.
+```{r import_data, eval=T, message=F, warning=F}
+ 
+# Read subject phenotypes.
+su.ds <- read.table("~/RNA-Seq_practice/GTEx_Data/GTEx_Data_V6_Annotations_SubjectPhenotypesDS.txt", 
+header=T, row.names=1, sep="\t") 
+
+# Extract males aged 50-59 from death of Ventilator Case.
+mal50ven <- subset(su.ds, su.ds$AGE=="50-59" & su.ds$GENDER==1 & su.ds$DTHHRDY==0)
+
+# Read in sample attributes.
+sam.ds <- read.table("~/RNA-Seq_practice/GTEx_Data/GTEx_Data_V6_Annotations_SampleAttributesDS.txt", 
+header=T, row.names=1, sep="\t", fill=T)
+
+# Subset the sample type columns.
+sam.type <- sam.ds[,5:6]
+
+# Read in all the raw counts.
+if (file.exists("count")) { load("count") } else {
+
+  count <- read.table("~/RNA-Seq_practice/GTEx_Data/GTEx_Analysis_v6p_RNA-seq_RNA-SeQCv1.1.8_gene_reads.gct.gz", 
+  header=F, row.names=1, sep="\t", fill=T)
+  save(count, file = "count")
+
+} 
+
+colnames(count)<-unname(t(count[2,])); count1 <- count[-c(1:2), ]
+
+```
+## Extract male subjects, aged 50-59, from ventilator Case (All cases on a ventilator 
+immediately before death).
+```{r Extract_specific_subject, eval=T, message=F, warning=F}
+
+inde <- NULL
+for (i in rownames(mal50ven)) {
+
+  inde <- c(inde, grep(paste0(i, ".*"), colnames(count1)))
+
+}
+
+count.mal <- data.matrix(count1[, inde])
+
+```
+
+## Filter data.
+```{r filter_data, eval=T, message=F, warning=F}
+
+# Filter out genes with low counts. 
+keep <- rowSums(cpm(count.mal)>1) >= 2; count.high <- count.mal[keep, ]
+
+# Screen out samples with detailed tissue discription.
+count.tis.de <- sam.type[colnames(count.high),]
+count.tis.de <- count.tis.de[!is.na(count.tis.de[, 2]), ]
+
+# Final counts used downstream.
+count.final <- count.mal[,rownames(count.tis.de)]
+colnames(count.final) <- count.tis.de[,2]
+
+
+
+count.final <- count.final[1:100,] # Toy data.
+
+```
+
+```{r gene_annotation, eval=F, message=F, warning=F}
+
+## Annotate genes with Entrez Gene identifiers and RefSeq for GO and KEGG enrichment.
+# Get Entrez ID.
+x <- as.list(org.Hs.egENSEMBL2EG)
+row.names(count.final) <- sub("\\.\\d+$", "", row.names(count.final))
+entrez <- x[row.names(count.final)]
+
+# For test purpose, only ENSEMBL ids mapped to single Entrez and Refseq ids are retained.
+entr.inde <- NULL
+for (i in entrez) {
+  
+  if (length(i) == 1) { entr.inde <- c(entr.inde, which(entrez == i)) }
+
+}
+
+entr.sel <- entrez[sort(names(entr.inde))]
+
+# Get RefSeq ID.
+x.ref <- org.Hs.egREFSEQ; mapped <- mappedkeys(x.ref); x.li <- as.list(x.ref[mapped])
+refseq <- x.li[unlist(entr.sel)]
+
+```
+
+
+## Convert the final counts to DGEList.
+```{r DGEList, eval=T, message=F, warning=F}
+
+y <- DGEList(counts=count.final, genes=rownames(count.final))
+y$samples$lib.size <- colSums(y$counts)
+y <- calcNormFactors(y)
+
+colnames(y$genes) <- "ENSEMBL_ID"
+
+```
+
+## Data exploration: examine outliers and sample relationships.
+
+```{r data_exploration, eval=T, message=F, warning=F}
+
+# Distances on the plot resembles the log2 fold changes between samples.
+ plotMDS(y)
+
+```
+
+## Design matrix.
+```{r design_matrix, eval=T, message=F, warning=F}
+
+# Make factor index for tissues.
+tiss <- count.tis.de[,2]
+
+level <- rep(0, length(tiss)); j <- 0
+for (i in unique(tiss)) {
+
+  j <- j+1; level[tiss==i]=j
+
+}
+
+Tissue <- factor(level)
+
+# Make design matrix.
+design <- model.matrix(~0+Tissue)
+rownames(design) <- make.names(colnames(count.final))
+colnames(design) <- make.names(unique(tiss))
+
+```
+
+## NB dispersion estimation.
+```{r NB_dispersion, eval=T, message=F, warning=F}
+
+y <- estimateDisp(y, design, robust=TRUE)
+plotBCV(y)
+
+```
+
+# Differential analysis of any pairs with analysis of deviance (ANODEV). In the 
+# quasi-likelihood (QL) approach, the tagwise NB dispersions are not used. The estimation 
+# of QL dispersions is performed using the glmQLFit function. This method requires 
+# "edgeR_3.18.0" and "R/3.4.0".
+
+## Contrast matrix and glm fit.
+```{r matrix_fit, eval=T, message=F, warning=F}
+
+# Make contrast matrix for all pairwise comparisons.
+con1 <- combn(colnames(design), 2)
+con2 <- paste(con1[1,], con1[2,], sep="-")
+con.ma <- makeContrasts(contrasts=con2, levels=design)
+
+# Glm fit.
+fit.ql<-glmQLFit(y, design,robust=TRUE)
+plotQLDisp(fit.ql)
+
+```
+
+## QL F-test.
+```{r F_test, eval=T, message=F, warning=F}
+
+res.ql <- glmQLFTest(fit.ql, contrast=con.ma)
+top <- topTags(res.ql, n=nrow(res.ql), adjust.method="BH", sort.by="PValue", p.value=1)
+# rownames(top) <- unname(unlist(top[, 1]))
+
+```
+
+## Extract up and dow DEGs of each comparison.
+```{r DEGs_each_comparison, eval=T, message=F, warning=F}
+
+all.up.ql <- all.dow.ql <- NULL
+
+for (i in colnames(design)) {
+  
+  # For tissue X, extract up/dow DEGs from "X-other" comparison.
+  con.ql <- colnames(top)[grep(paste0("logFC\\.", i, "\\."), colnames(top))]
+  gen.up.ql <- gen.dow.ql <- NULL
+  if (length(con.ql)) {
+
+    for (j in con.ql) {
+
+      up.ql1 <- top$table[top$table[, j] > 1 & top$table$FDR < 0.01, "ENSEMBL_ID"]
+      dow.ql1 <- top$table[top$table[, j] < -1 & top$table$FDR < 0.01, "ENSEMBL_ID"]
+      gen.up.ql <- c(gen.up.ql, up.ql1); gen.dow.ql <- c(gen.dow.ql, dow.ql1)
+    }
+
+  }
+
+  # For tissue X, extract up/dow DEGs from "other-X" comparison.
+  con.ql <- colnames(top)[grep(paste0(i, "$"), colnames(top))]
+  if (length(con.ql)) {
+
+    for (k in con.ql) {
+
+      up.ql2 <- top$table[top$table[, k] < -1 & top$table$FDR < 0.01, "ENSEMBL_ID"]
+      dow.ql2 <- top$table[top$table[, k] > 1 & top$table$FDR < 0.01, "ENSEMBL_ID"]
+      gen.up.ql <- c(gen.up.ql, up.ql2); gen.dow.ql <- c(gen.dow.ql, dow.ql2)
+
+    }
+
+  }
+
+  # Assign up/dow DEGs to each tissue in vectors, and store all vector names in 
+  # "all.up.ql", "all.dow.ql".
+  assign(paste0(i, "_UP_ql"), gen.up.ql);  assign(paste0(i, "_DOW_ql"), gen.dow.ql) 
+  all.up.ql <- c(all.up.ql, paste0(i, "_UP_ql"))
+  all.dow.ql <- c(all.dow.ql, paste0(i, "_DOW_ql"))
+
+}
+
+```
+
+## Extract tissue specific DEGs, relative to the all other tissues.
+```{r tissue_specific_DEGs, eval=T, message=F, warning=F}
+
+na.up.ql <- na.dow.ql <- NULL
+
+# Extract all tissue specific up DEGs for each tissue.
+for (i in colnames(design)) {
+
+  up.na.all <- all.up.ql[grep(i, all.up.ql)]
+  up.na <- NULL
+  for (j in up.na.all) {
+
+    if (length(get(j))) { up.na <- c(up.na, get(j)); assign(paste0(i, "_up_ql_all"), up.na) }
+
+  }
+
+  # For tissue X, assign all tissue-specific up DEGs to X_up_al.
+  ta.ql <- table(get(paste0(i, "_up_ql_all")))
+  ta.fa <- ta.ql[ta.ql == length(grep(i, colnames(con.ma)))]
+  assign(paste0(i, "_up_ql"), names(ta.fa))
+
+  # Store all "X_up_ql" in "na.up.ql".
+  na.up.ql <- c(na.up.ql, paste0(i, "_up_ql"))
+
+  # Extract all tissue specific down DEGs.
+  dow.na.all <- all.dow.ql[grep(i, all.dow.ql)]
+  dow.na <- NULL
+  for (k in dow.na.all) {
+
+    if (length(get(k))) { dow.na <- c(dow.na, get(k)); assign(paste0(i, "_dow_ql_all"), 
+    dow.na) }
+
+  }
+
+  # For tissue X, assign all tissue-specific up DEGs to X_dow_al.
+  ta.ql.dow <- table(get(paste0(i, "_dow_ql_all")))
+  ta.fa.dow <- ta.ql.dow[ta.ql.dow == length(grep(i, colnames(con.ma)))]
+  assign(paste0(i, "_dow_ql"), names(ta.fa.dow))
+  
+  # Store all "X_dow_ql" in "na.dow.ql".
+  na.dow.ql <- c(na.dow.ql, paste0(i, "_dow_ql"))
+
+}
+
+# Store all vectors containing all DEGs in "deg.gen.ql".
+deg.gen.ql <- c(na.up.ql, na.dow.ql)
+
+```
+
+# Differential analysis of any pairs with glmLRT() via a loop.
+
+## Extract DEGs in each comparison.
+```{r DEGs_each_comparison_PW, eval=T, message=F, warning=F}
+
+# This step is time comsuming, so save the results.
+df.na <- NULL
+for (i in 2:ncol(design)) {
+
+  for (j in seq(i-1)) {
+
+  na <- paste0(colnames(design)[i], "_VS_", colnames(design)[j])
+  na.up <- paste0(na, "_up"); na.dow <- paste0(na, "_dow")
+  df.na <- c(df.na, c(na.up, na.dow))
+
+  }
+
+}
+
+if (all(file.exists(df.na))) {
+
+  for (i in df.na) { load(i) }
+
+} else {
+
+  # Compare each tissue to all the rest independently.
+  con <- integer(ncol(design)); df.na <- NULL
+  fit <- glmFit(y, design)
+  for (i in 2:ncol(design)) {
+
+    for (j in seq(i-1)) {
+
+      con[i] <- 1; con[j] <- -1
+      lrt <- glmLRT(fit, contrast=con)
+      toptag <- topTags(lrt, n=nrow(lrt$table)); tab <- toptag$table
+      rownames(tab) <- tab[, "ENSEMBL_ID"]; tab <- tab[, -1]
+      deg.up <- tab[tab$FDR < 0.01 & tab$logFC > 1, c("logFC", "FDR")]
+      deg.dow <- tab[(tab$FDR < 0.01) & (tab$logFC < -1), c("logFC", "FDR")]
+    
+      # Assign data frames of degs to corresponding comparisons.
+      na <- paste0(colnames(design)[i], "_VS_", colnames(design)[j])
+      na.up <- paste0(na, "_up"); na.dow <- paste0(na, "_dow")
+      assign(na.up, deg.up); assign(na.dow, deg.dow)
+      
+      # Store all data frame names, which contain "logFC, FDR".
+      df.na <- c(df.na, c(na.up, na.dow))
+ 
+    }
+
+  }
+
+  for (i in df.na) {
+ 
+    sa <- get(i); save(sa, file=i)
+
+  }
+
+}
+
+```
+
+
+## Extract tissue specific DEGs from above data frames.
+```{r tissue_specific_DEGs_PW, eval=T, message=F, warning=F}
+
+deg.gen <- NULL
+for (i in colnames(design)) {
+
+  # For tissue X, extract all "X-other" comparisons.
+  vs1 <- df.na[grep(paste0(i, "_VS_"), df.na)]
+  up.gen <- dow.gen <- NULL
+
+  for (j in vs1) {
+
+    if (sum(grep("_up", j) & nrow(get(j)))) {
+
+      up.gen <- c(up.gen, rownames(get(j)))
+
+    } else if (sum(grep("_dow", j) & nrow(get(j)))) {
+
+     dow.gen <- c(dow.gen, rownames(get(j)))
+
+    }
+
+  }
+
+  # For tissue X, extract all "other-X" comparisons.
+  vs2 <- df.na[grep(paste0("_VS_", i), df.na)]
+  
+  for (j in vs2) {
+
+    if (sum(grep("_up", j) & nrow(get(j)))) {
+
+      dow.gen <- c(dow.gen, rownames(get(j)))
+
+    } else if (sum(grep("_dow", j) & nrow(get(j)))) {
+
+      up.gen <- c(up.gen, rownames(get(j)))
+
+    }
+
+  }
+
+  # Extract the tissue-specific DEGs.
+  tab.up <- table(up.gen); up <- names(tab.up[tab.up==ncol(design)-1])
+  tab.dow <- table(dow.gen); dow <- names(tab.dow[tab.dow==ncol(design)-1])
+
+  assign(paste0(i, "_up"), up); assign(paste0(i, "_dow"), dow)
+
+  # Store all vector names containing DEGs in "deg.gen".
+  deg.gen <- c(deg.gen, paste0(i, "_up"), paste0(i, "_dow"))
+
+}
+
+```
+
+## Extract DEGs identified by both methods.
+```{r Overlapping_DEGs, eval=T, message=F, warning=F}
+
+sor.ql <- sub("(.*)_ql", "\\1", sort(deg.gen.ql))
+deg.both <- NULL
+if (all(sor.ql == sort(deg.gen))) {
+
+  for (i in 1:length(deg.gen)) {
+
+    # Find overlapping DEGs for each tissue.
+    both <- intersect(get(sort(deg.gen.ql)[i]), get(sort(deg.gen)[i]))
+    assign(paste0(deg.gen[i], "_both"), both)
+
+    # Store vector names of ovlapping DEGs in "deg.both".
+    deg.both <- c(deg.both, paste0(deg.gen[i], "_both"))
+
+  }
+
+}
+
+```
+
+# Summary of DEGs by the two methods and the overlapping DEGs.
+```{r summary_DEGs, eval=T, message=F, warning=F}
+
+df.sum <- data.frame(matrix(NA, nrow = nrow(con.ma), ncol = 9, dimnames = list(sort(
+rownames(con.ma)), c("up.pairwise", "up.ql", "up.both", "dow.pairwise", "dow.ql", "dow.both", 
+"all.pairwise", "all.ql", "all.both"))))
+
+# Summarize counts of all up DEGs for pairwise comparison.
+up.sum <- sort(deg.gen[grep("_up", deg.gen)])
+
+if (all(sub("(.*)_up", "\\1", up.sum) == sort(rownames(con.ma)))) {
+
+  df.sum[, "up.pairwise"] <- sapply(up.sum, function (x) length(get(x)))
+
+}
+
+# Summarize counts of all down DEGs for pairwise comparison.
+dow.sum <- sort(deg.gen[grep("_dow", deg.gen)])
+
+if (all(sub("(.*)_dow", "\\1", dow.sum) == sort(rownames(con.ma)))) {
+
+  df.sum[, "dow.pairwise"] <- sapply(dow.sum, function (x) length(get(x)))
+
+}
+
+# Summarize counts of all up/down DEGs for pairwise comparison.
+df.sum[, "all.pairwise"] <- rowSums(df.sum[, c("up.pairwise", "dow.pairwise")])
+
+up.sum.ql <- sort(deg.gen.ql[grep("_up", deg.gen.ql)])
+
+# Summarize counts of all up DEGs for QL comparison.
+if (all(sub("(.*)_up_ql", "\\1", up.sum.ql) == sort(rownames(con.ma)))) {
+
+  df.sum[, "up.ql"] <- sapply(up.sum.ql, function (x) length(get(x)))
+
+}
+
+# Summarize counts of all down DEGs for QL comparison.
+dow.sum.ql <- sort(deg.gen.ql[grep("_dow_ql", deg.gen.ql)])
+
+if (all(sub("(.*)_dow_ql", "\\1", dow.sum.ql) == sort(rownames(con.ma)))) {
+
+  df.sum[, "dow.ql"] <- sapply(dow.sum.ql, function (x) length(get(x)))
+
+}
+
+# Summarize counts of all up/down DEGs for QL comparison.
+df.sum[, "all.ql"] <- rowSums(df.sum[, c("up.ql", "dow.ql")])
+
+# Summarize counts of all overlapping up DEGs.
+up.sum.bo <- sort(deg.both[grep("_up_both", deg.both)]) 
+if (all(sub("(.*)_up_both", "\\1", up.sum.bo) == sort(rownames(con.ma)))) {
+
+  df.sum[, "up.both"] <- sapply(up.sum.bo, function (x) length(get(x)))
+
+}
+
+# Summarize counts of all overlapping down DEGs.
+dow.sum.bo <- sort(deg.both[grep("_dow_both", deg.both)]) 
+if (all(sub("(.*)_dow_both", "\\1", dow.sum.bo) == sort(rownames(con.ma)))) {
+
+  df.sum[, "dow.both"] <- sapply(dow.sum.bo, function (x) length(get(x)))
+
+}
+
+# Summarize counts of all overlapping up/down DEGs.
+df.sum[, "all.both"] <- rowSums(df.sum[, c("up.both", "dow.both")])
+
+```
+
+# Heat map of all DEGs.
+```{r heatmap_DEGs, eval=T, message=F, warning=F}
+
+y.nor <- cpm(y, log=TRUE, prior.count = 1)
+
+all.deg.hm <- NULL
+for (i in c(deg.gen, deg.gen.ql)) { all.deg.hm <- c(all.deg.hm, get(i)) }
+
+hm.y <- y.nor[all.deg.hm, ]
+palette <- colorRampPalette(c("red", "yellow", "green"))(n = 300)
+heatmap.2(hm.y, main = "All tissue-specific DEGs", notecol=F, density.info="none", 
+trace="none", margins =c(12,9), col=palette, dendrogram="both", scale="row")
+
+```
+
+# Modular analysis.
+```{r module_analysis, eval=T, message=F, warning=F}
+
+library(isa2, lib.loc = "~/R/x86_64-pc-linux-gnu-library/3.4")
+set.seed(10)
+mo <- isa(y$counts)
+
+# Translate "mo" into modules.
+mod <- lapply(seq(ncol(mo$rows)), function(x) { list(rows = which(mo$rows[, x] != 0), 
+columns = which(mo$columns[, x] !=0)) })
+
+# Number of identified modules.
+length(mod)
+
+# Tissue specific modules.
+colnames(y$counts)[mod[[4]]$columns]
+
+# Modules refering to multiple tissues.
+colnames(y$counts)[mod[[5]]$columns]
+
+```
+
+# Session Information.
+```{r sessionInfor, eval=T, message=F, warning=F}
+
+sessionInfo()
+
+```
+
+# Reference.
+
+1. https://f1000research.com/articles/5-1438/v1
+2. https://www2.unil.ch/cbg/homepage/ISA_tutorial.html
+3. https://www.bioconductor.org/packages/devel/bioc/vignettes/edgeR/inst/doc/edgeRUsers
+   Guide.pdf
+4. https://www.gtexportal.org/home/
+5. http://www.nature.com/nbt/journal/v23/n12/full/nbt1205-1499.html
+
+
+
+
+
+
