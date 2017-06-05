@@ -60,7 +60,7 @@ count.mal <- data.matrix(count1[, inde])
 
 ```
 
-## 1.4 Filter data.
+## Filter data.
 ```{r filter_data, eval=T, message=F, warning=F}
 
 # Filter out genes with low counts. 
@@ -80,9 +80,9 @@ count.final <- count.final[1:100,] # Toy data.
 
 ```
 
-## 1.5 Annotate genes with Entrez Gene identifiers and RefSeq for GO and KEGG enrichment.
 ```{r gene_annotation, eval=F, message=F, warning=F}
 
+## 1.4 Annotate genes with Entrez Gene identifiers and RefSeq for GO and KEGG enrichment.
 # Get Entrez ID.
 x <- as.list(org.Hs.egENSEMBL2EG)
 row.names(count.final) <- sub("\\.\\d+$", "", row.names(count.final))
@@ -105,7 +105,7 @@ refseq <- x.li[unlist(entr.sel)]
 ```
 
 
-## 1.6 Convert the final counts to DGEList.
+## 1.5 Convert the final counts to DGEList.
 ```{r DGEList, eval=T, message=F, warning=F}
 
 y <- DGEList(counts=count.final, genes=rownames(count.final))
@@ -116,7 +116,8 @@ colnames(y$genes) <- "ENSEMBL_ID"
 
 ```
 
-## 1.7 Data exploration: examine outliers and sample relationships.
+## 1.6 Data exploration: examine outliers and sample relationships.
+
 ```{r data_exploration, eval=T, message=F, warning=F}
 
 # Distances on the plot resembles the log2 fold changes between samples.
@@ -124,7 +125,7 @@ colnames(y$genes) <- "ENSEMBL_ID"
 
 ```
 
-## 1.8 Design matrix.
+## 1.7 Design matrix.
 ```{r design_matrix, eval=T, message=F, warning=F}
 
 # Make factor index for tissues.
@@ -146,7 +147,7 @@ colnames(design) <- make.names(unique(tiss))
 
 ```
 
-## 1.9 NB dispersion estimation.
+## NB dispersion estimation.
 ```{r NB_dispersion, eval=T, message=F, warning=F}
 
 y <- estimateDisp(y, design, robust=TRUE)
